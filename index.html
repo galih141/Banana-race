@@ -1,0 +1,74 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<title>Banana Racer</title>
+<style>
+  html,body{margin:0;height:100%;overflow:hidden;background:#9ec9e8;font-family:system-ui,Segoe UI,Roboto,sans-serif;touch-action:none;user-select:none;-webkit-user-select:none}
+  canvas{display:block}
+  #hud{position:fixed;inset:0;pointer-events:none;color:#fff;text-shadow:0 2px 6px rgba(0,0,0,.55)}
+  #top{position:absolute;top:12px;left:16px;font-size:20px;font-weight:700;line-height:1.35}
+  #top small{font-weight:500;opacity:.9;font-size:14px}
+  #speed{position:absolute;right:18px;bottom:18px;text-align:right;font-weight:800;font-size:44px;line-height:1}
+  #speed span{font-size:16px;font-weight:600;opacity:.9}
+  #boostWrap{position:absolute;right:18px;bottom:76px;width:150px;height:10px;background:rgba(0,0,0,.35);border-radius:6px;overflow:hidden}
+  #boost{height:100%;width:100%;background:linear-gradient(90deg,#ffd23f,#ff7a00)}
+  #msg{position:absolute;left:0;right:0;top:30%;text-align:center;font-size:80px;font-weight:900;letter-spacing:2px}
+  #sub{position:absolute;left:0;right:0;top:calc(30% + 96px);text-align:center;font-size:20px;font-weight:600;white-space:pre-line}
+  #driftTxt{position:absolute;left:0;right:0;bottom:90px;text-align:center;font-size:30px;font-weight:900;letter-spacing:2px}
+  #help{position:absolute;left:16px;bottom:14px;font-size:13px;opacity:.9;line-height:1.5}
+  #loading{position:fixed;inset:0;background:#1d2b3a;color:#fff;display:flex;flex-direction:column;gap:14px;align-items:center;justify-content:center;font-size:22px;z-index:10;text-align:center;padding:20px}
+  #loading small{font-size:15px;opacity:.85;max-width:560px;line-height:1.5}
+  .tbtn{position:fixed;bottom:18px;width:68px;height:68px;border-radius:50%;background:rgba(255,255,255,.28);border:2px solid rgba(255,255,255,.6);color:#fff;font-size:26px;display:none;align-items:center;justify-content:center;z-index:5;font-weight:700}
+  .tbtn.on{background:rgba(255,210,63,.7)}
+  #select{position:fixed;left:0;right:0;bottom:24px;display:none;flex-direction:column;align-items:center;gap:6px;z-index:6;color:#fff;text-shadow:0 2px 6px rgba(0,0,0,.6)}
+  #select .title{font-size:13px;font-weight:700;opacity:.85;letter-spacing:2px;text-transform:uppercase;margin-top:4px}
+  .selRow{display:flex;align-items:center;gap:16px}
+  .selName{min-width:270px;text-align:center;font-size:30px;font-weight:900}
+  #trkName{font-size:22px}
+  #select button,.fileBtn{font:inherit;color:#fff;cursor:pointer;border:2px solid rgba(255,255,255,.7);background:rgba(0,0,0,.35);border-radius:14px}
+  .arrow{width:50px;height:46px;font-size:22px}
+  #selGo{padding:12px 34px;font-size:22px;font-weight:800;background:#ff9d00!important;border-color:#ffd23f!important;margin-top:6px}
+  #selGo:disabled{opacity:.55;cursor:default}
+  .fileBtn{display:inline-block;padding:8px 14px;font-size:14px}
+  #selHint{font-size:13px;opacity:.9}
+  #selMsg{font-size:14px;color:#ffd6d6;min-height:18px;max-width:90vw;text-align:center}
+  @media (pointer:coarse){#select{bottom:120px}}
+  @media (pointer:coarse){.tbtn{display:flex} #help{display:none} #speed{bottom:100px}#boostWrap{bottom:150px}}
+</style>
+</head>
+<body>
+<div id="loading"><div id="loadMsg">Loading Banana Racer…</div><small id="loadSub"></small></div>
+<div id="hud">
+  <div id="top"></div>
+  <div id="msg"></div>
+  <div id="sub"></div>
+  <div id="boostWrap"><div id="boost"></div></div>
+  <div id="driftTxt"></div>
+  <div id="speed">0 <span>km/h</span></div>
+  <div id="help">↑/W gas &nbsp; ↓/S brake &nbsp; ←→/AD steer &nbsp; <b>Space</b> jump &nbsp; Shift boost &nbsp; <b>Drift:</b> hold ← then tap → (or → then ←) &nbsp; R reset car &nbsp; Enter restart &nbsp; C car/track menu &nbsp; M mute</div>
+</div>
+<div id="select">
+  <div class="title">Car</div>
+  <div class="selRow"><button class="arrow" id="selPrev">◀</button><div class="selName" id="selName">…</div><button class="arrow" id="selNext">▶</button></div>
+  <div class="title">Track</div>
+  <div class="selRow"><button class="arrow" id="trkPrev">◀</button><div class="selName" id="trkName">…</div><button class="arrow" id="trkNext">▶</button></div>
+  <button id="selGo" disabled>LOADING…</button>
+  <div id="selHint">←/→ car · ↑/↓ track · Enter to start</div>
+  <label class="fileBtn">＋ Add .glb (car or track)<input type="file" id="fileIn" accept=".glb" multiple hidden></label>
+  <div id="selMsg"></div>
+</div>
+<div class="tbtn" id="bL" style="left:16px">◀</div>
+<div class="tbtn" id="bR" style="left:96px">▶</div>
+<div class="tbtn" id="bB" style="right:96px;bottom:96px;width:56px;height:56px;font-size:16px">NOS</div>
+<div class="tbtn" id="bJ" style="right:96px;font-size:14px">JUMP</div>
+<div class="tbtn" id="bG" style="right:16px;font-size:14px">GAS</div>
+<div class="tbtn" id="bBr" style="right:16px;bottom:96px;width:56px;height:56px;font-size:14px">BRK</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/loaders/GLTFLoader.js"></script>
+<script src="js/racingline.js"></script>
+<script src="js/game.js"></script>
+</body>
+</html>
