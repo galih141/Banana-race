@@ -51,6 +51,12 @@ scene.add(new THREE.HemisphereLight(0xffffff, 0x8a7a66, 0.95));
 const sun = new THREE.DirectionalLight(0xffffff, 0.9);
 sun.position.set(3, 6, 2);
 scene.add(sun);
+// matte-painting dome: an unlit, shadow-free sphere that follows the camera (so it always looks infinitely far away)
+const BACKDROP_YAW = 0;                      // turn the panorama around if its "front" should face another way
+const dome = new THREE.Mesh((() => { const g = new THREE.SphereGeometry(50, 64, 32); g.scale(-1, 1, 1); return g; })(),
+  new THREE.MeshBasicMaterial({ color: 0xffffff, fog: false, depthWrite: false, toneMapped: false }));
+dome.visible = false; dome.renderOrder = -1000; dome.frustumCulled = false; dome.rotation.y = BACKDROP_YAW;
+scene.add(dome);
 addEventListener('resize', () => {
   renderer.setSize(innerWidth, innerHeight);
   camera.aspect = innerWidth / innerHeight; camera.updateProjectionMatrix();
@@ -331,16 +337,28 @@ function processTrack(gltf) {
   const root = gltf.scene;
   root.updateMatrixWorld(true);
   const trackNodes = [], lapNodes = [];
+  const matteNodes = [];
   root.traverse(o => {
     if (o === root) return;
     if (RL.isLapName(o.name)) lapNodes.push(o);
+    else if (RL.isMatteName(o.name)) matteNodes.push(o);
     else if (RL.isTrackName(o.name)) trackNodes.push(o);
   });
+  // matte painting mesh: drawn flat (no lighting, no fog, no shadows), never touched by physics
+  matteNodes.forEach(n => n.traverse(o => {
+    if (!o.isMesh) return;
+    o.castShadow = false; o.receiveShadow = false; o.renderOrder = -10; o.frustumCulled = false; o.raycast = () => {};
+    const ms = Array.isArray(o.material) ? o.material : [o.material];
+    const nm = ms.map(m => new THREE.MeshBasicMaterial({
+      map: (m && (m.map || m.emissiveMap)) || null, color: (m && !m.map && !m.emissiveMap && m.color) ? m.color.clone() : 0xffffff,
+      side: THREE.DoubleSide, fog: false, toneMapped: false, depthWrite: false }));
+    o.material = Array.isArray(o.material) ? nm : nm[0];
+  }));
   lapNodes.forEach(n => { n.visible = false; });  // the gate is never drawn
   if (!trackNodes.length) throw new Error('no node whose name starts with "track" in this file');
   const seen = new Set(); let meshes = [];
   trackNodes.forEach(t => t.traverse(o => {
-    if (o.isMesh && !o.isSkinnedMesh && !seen.has(o) && !anc(o, p => RL.isLapName(p.name))) { seen.add(o); meshes.push(o); }
+    if (o.isMesh && !o.isSkinnedMesh && !seen.has(o) && !anc(o, p => RL.isLapName(p.name) || RL.isMatteName(p.name))) { seen.add(o); meshes.push(o); }
   }));
   const matName = m => { const ms = Array.isArray(m.material) ? m.material : [m.material]; return ms.some(x => x && RL.isTrackName(x.name)); };
   if (meshes.some(matName)) meshes = meshes.filter(matName);          // only the drivable material, if one is named "track…"
@@ -369,7 +387,7 @@ function processTrack(gltf) {
   const bb = new THREE.Box3(); meshes.forEach(m => bb.expandByObject(m));
   let mixer = null;
   if (gltf.animations && gltf.animations.length) { mixer = new THREE.AnimationMixer(root); gltf.animations.forEach(c => mixer.clipAction(c).play()); }
-  return { root, meshes, line, mixer, top: bb.max.y + 1, far: bb.max.y - bb.min.y + 3, minY: bb.min.y, hasGate: lapNodes.length > 0 };
+  return { root, meshes, line, mixer, top: bb.max.y + 1, far: bb.max.y - bb.min.y + 3, minY: bb.min.y, hasGate: lapNodes.length > 0, hasMatte: matteNodes.length > 0 };
 }
 async function getTrack(entry) {
   let t = trackCache[entry.url];
@@ -381,6 +399,31 @@ function applyTrack(t) {
   trackObj = t; scene.add(t.root);
   roadMeshes = t.meshes; rayTop = t.top; rayFar = t.far; killY = t.minY - 1.2;
   setRacingLine(t.line);
+}
+
+// ---- matte painting backdrop ----
+let bdTok = 0, localBackdrop = null;
+const loadTex = url => new Promise((res, rej) => new THREE.TextureLoader().load(url, res, undefined, () => rej(new Error('no image'))));
+function showDome(tex) {
+  tex.encoding = THREE.sRGBEncoding;
+  tex.anisotropy = Math.min(8, renderer.capabilities.getMaxAnisotropy());
+  dome.material.map = tex; dome.material.needsUpdate = true; dome.visible = true;
+}
+// priority: a mesh named "matepainting" inside the track file  >  assets/backdrops/<track file name>.jpg|png|webp  >  assets/backdrops/matepainting.jpg|png|webp
+async function updateBackdrop(entry, t) {
+  const tok = ++bdTok;
+  if (t.hasMatte) { dome.visible = false; return; }
+  if (localBackdrop) { showDome(localBackdrop); return; }
+  if (location.protocol === 'file:') { dome.visible = false; return; }
+  const base = (entry.file || '').replace(/\.glb$/i, '');
+  for (const b of [base, 'matepainting']) {
+    if (!b) continue;
+    for (const ext of ['jpg', 'jpeg', 'png', 'webp']) {
+      if (tok !== bdTok) return;
+      try { const tex = await loadTex('assets/backdrops/' + encodeURIComponent(b) + '.' + ext); if (tok !== bdTok) return; showDome(tex); return; } catch (e) { /* try next */ }
+    }
+  }
+  if (tok === bdTok) dome.visible = false;
 }
 
 // ---------- bots ----------
@@ -546,6 +589,7 @@ async function chooseTrack(i) {
     const t = await getTrack(TRACKS[trackIdx]);
     if (tok !== trackTok) return;
     applyTrack(t);
+    updateBackdrop(TRACKS[trackIdx], t);
     $('trkName').textContent = TRACKS[trackIdx].name;
     if (!t.hasGate) toast('"' + TRACKS[trackIdx].name + '": no box named "lap" found — start line placed automatically.', 6);
     if (playerRig && race.state === 'select') placeAtStart();
@@ -604,10 +648,15 @@ function classify(gltf) {
 }
 async function addLocalFiles(files) {
   for (const f of files) {
-    if (!/\.glb$/i.test(f.name)) { toast('"' + f.name + '" is not a .glb file', 5); continue; }
+    if (/\.(jpe?g|png|webp)$/i.test(f.name)) {
+      try { localBackdrop = await loadTex(URL.createObjectURL(f)); showDome(localBackdrop); toast('Matte painting "' + f.name + '" applied (until you reload — put it in assets/backdrops to keep it)', 6); }
+      catch (e) { toast('"' + f.name + '": could not read this image', 6); }
+      continue;
+    }
+    if (!/\.glb$/i.test(f.name)) { toast('"' + f.name + '" is not a .glb or image file', 5); continue; }
     const url = URL.createObjectURL(f);
     try {
-      const gltf = await loadGLB(url), kind = classify(gltf), entry = { name: prettyName(f.name), url };
+      const gltf = await loadGLB(url), kind = classify(gltf), entry = { name: prettyName(f.name), file: f.name, url };
       if (kind === 'car') { carCache[url] = { gltf }; CARS.push(entry); toast('Added car "' + entry.name + '" (until you reload — upload it to assets/cars to keep it)', 6); }
       else if (kind === 'track') { TRACKS.push(entry); trackCache[url] = processTrack(gltf); toast('Added track "' + entry.name + '" (until you reload — upload it to assets/tracks to keep it)', 6); }
       else toast('"' + f.name + '": could not tell if this is a car (wheels / "cars_body") or a track ("track…")', 9);
@@ -861,6 +910,7 @@ function loop(now) {
   collideCars();
   updatePuffs(dt);
   updateVisuals(dt);
+  dome.position.copy(camera.position);
   updateHUD();
   updateAudio();
   renderer.render(scene, camera);
@@ -891,7 +941,7 @@ function showEmpty() {
 (async function startup() {
   requestAnimationFrame(loop);
   const man = location.protocol === 'file:' ? { cars: [], tracks: [] } : await fetchManifest();
-  const mk = (list, dir) => (list || []).map(f => ({ name: prettyName(f), url: 'assets/' + dir + '/' + encodeURIComponent(f) }));
+  const mk = (list, dir) => (list || []).map(f => ({ name: prettyName(f), file: f, url: 'assets/' + dir + '/' + encodeURIComponent(f) }));
   CARS = mk(man.cars, 'cars'); TRACKS = mk(man.tracks, 'tracks');
   if (location.protocol === 'file:') {
     $('loadMsg').textContent = 'Opened as a local file';
