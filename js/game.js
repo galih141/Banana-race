@@ -173,15 +173,18 @@ const gltfLoader = new THREE.GLTFLoader();
 const loadGLB = url => new Promise((res, rej) => gltfLoader.load(url, res, undefined, err => rej(new Error('Could not load ' + url))));
 
 async function fetchManifest() {
+  // On GitHub Pages ask GitHub which files are in the folders (always up to date, no Action needed);
+  // otherwise / if that fails, use assets/manifest.json.
+  const api = await githubListing();
+  if (api && (api.cars.length || api.tracks.length)) return api;
   let man = null;
   try {
-    const r = await fetch('assets/manifest.json?v=' + Date.now());
+    const r = await fetch('assets/manifest.json?v=' + Date.now(), { cache: 'no-store' });
     if (r.ok) man = await r.json();
   } catch (e) { /* ignore */ }
-  if (!man || ((!man.cars || !man.cars.length) && (!man.tracks || !man.tracks.length))) man = await githubListing();
   return man || { cars: [], tracks: [] };
 }
-async function githubListing() {                  // fallback: ask GitHub which files are in assets/cars and assets/tracks
+async function githubListing() {
   const h = location.hostname;
   if (!h.endsWith('.github.io')) return null;
   const owner = h.split('.')[0], repo = location.pathname.split('/')[1];
@@ -189,9 +192,9 @@ async function githubListing() {                  // fallback: ask GitHub which 
   try {
     const out = { cars: [], tracks: [] };
     for (const k of ['cars', 'tracks']) {
-      const r = await fetch('https://api.github.com/repos/' + owner + '/' + repo + '/contents/assets/' + k);
-      if (!r.ok) continue;
-      out[k] = (await r.json()).filter(f => /\.glb$/i.test(f.name)).map(f => f.name);
+      const r = await fetch('https://api.github.com/repos/' + owner + '/' + repo + '/contents/assets/' + k, { cache: 'no-store' });
+      if (!r.ok) return null;                       // rate-limited or not found -> use the manifest instead
+      out[k] = (await r.json()).filter(f => f.type === 'file' && /\.glb$/i.test(f.name)).map(f => f.name).sort((a, b) => a.localeCompare(b));
     }
     return out;
   } catch (e) { return null; }
@@ -578,7 +581,7 @@ function enterSelect() {
   placeAtStart();
   race = { state: 'select', t: 0, countdown: 3.4, lapStart: 0, best: race.best, total: 0 };
   $('select').style.display = 'flex'; $('msg').textContent = ''; $('sub').textContent = '';
-  $('selHint').textContent = (CARS.length > 1 ? '←/→ car · ' : '') + (TRACKS.length > 1 ? '↑/↓ track · ' : '') + 'Enter to start';
+  $('selHint').textContent = (CARS.length > 1 ? '←/→ car · ' : '') + (TRACKS.length > 1 ? '↑/↓ track · ' : '') + 'Enter to start   (' + CARS.length + ' cars, ' + TRACKS.length + ' tracks found)';
 }
 function startFromSelect() {
   if (race.state !== 'select' || busy > 0 || !playerRig || !TRACK) return;
