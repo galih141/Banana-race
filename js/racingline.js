@@ -20,6 +20,8 @@
   // lap gate: name starts with "lap"; "lap_reverse" / "lap_rev" flips the race direction
   RL.isLapName = name => norm(name).startsWith('lap');
   RL.lapReversed = name => /rev/.test(norm(name));
+  // matte painting: a mesh named "matepainting" (or "mattepainting") — a flat-shaded background dome
+  RL.isMatteName = name => /^matt?epaint/.test(norm(name));
 
   // ---- road mask ----
   // tris: flat array [x0,z0,x1,z1,x2,z2, ...] in world units (top-down projection of the road surface)
