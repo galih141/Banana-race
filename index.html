@@ -8,7 +8,7 @@
   html,body{margin:0;height:100%;overflow:hidden;background:#9ec9e8;font-family:system-ui,Segoe UI,Roboto,sans-serif;touch-action:none;user-select:none;-webkit-user-select:none}
   canvas{display:block}
   #hud{position:fixed;inset:0;pointer-events:none;color:#fff;text-shadow:0 2px 6px rgba(0,0,0,.55)}
-  #top{position:absolute;top:12px;left:16px;font-size:20px;font-weight:700;line-height:1.35}
+  #top{position:absolute;top:14px;left:70px;font-size:20px;font-weight:700;line-height:1.35}
   #top small{font-weight:500;opacity:.9;font-size:14px}
   #speed{position:absolute;right:18px;bottom:18px;text-align:right;font-weight:800;font-size:44px;line-height:1}
   #speed span{font-size:16px;font-weight:600;opacity:.9}
@@ -20,7 +20,7 @@
   #help{position:absolute;left:16px;bottom:14px;font-size:13px;opacity:.9;line-height:1.5}
   #loading{position:fixed;inset:0;background:#1d2b3a;color:#fff;display:flex;flex-direction:column;gap:14px;align-items:center;justify-content:center;font-size:22px;z-index:10;text-align:center;padding:20px}
   #loading small{font-size:15px;opacity:.85;max-width:560px;line-height:1.5}
-  .tbtn{position:fixed;bottom:18px;width:68px;height:68px;border-radius:50%;background:rgba(255,255,255,.28);border:2px solid rgba(255,255,255,.6);color:#fff;font-size:26px;display:none;align-items:center;justify-content:center;z-index:5;font-weight:700}
+  .tbtn{position:fixed;border-radius:50%;background:rgba(255,255,255,.28);border:2px solid rgba(255,255,255,.6);color:#fff;display:none;align-items:center;justify-content:center;z-index:5;font-weight:700;touch-action:none}
   .tbtn.on{background:rgba(255,210,63,.7)}
   #select{position:fixed;left:0;right:0;bottom:24px;display:none;flex-direction:column;align-items:center;gap:6px;z-index:6;color:#fff;text-shadow:0 2px 6px rgba(0,0,0,.6)}
   #select .title{font-size:13px;font-weight:700;opacity:.85;letter-spacing:2px;text-transform:uppercase;margin-top:4px}
@@ -33,12 +33,43 @@
   #selGo:disabled{opacity:.55;cursor:default}
   .fileBtn{display:inline-block;padding:8px 14px;font-size:14px}
   #selHint{font-size:13px;opacity:.9}
+  #records{font-size:13px;opacity:.95;margin-top:2px}
+  #resetRec{font-size:11px;padding:2px 8px;opacity:.7;border-radius:8px;border:1px solid rgba(255,255,255,.5);background:rgba(0,0,0,.25);color:#fff;cursor:pointer;margin-left:6px}
   #selMsg{font-size:14px;color:#ffd6d6;min-height:18px;max-width:90vw;text-align:center}
-  @media (pointer:coarse){#select{bottom:120px}}
-  @media (pointer:coarse){.tbtn{display:flex} #help{display:none} #speed{bottom:100px}#boostWrap{bottom:150px}}
+  .topBtn{position:fixed;top:10px;left:10px;width:46px;height:46px;border-radius:12px;background:rgba(0,0,0,.4);border:2px solid rgba(255,255,255,.75);color:#fff;z-index:8;display:flex;align-items:center;justify-content:center;padding:0;cursor:pointer}
+  .topBtn svg{width:24px;height:24px;fill:none;stroke:#fff;stroke-width:2.4;stroke-linecap:round;stroke-linejoin:round}
+  #ctrlBtn{left:64px;width:auto;padding:0 14px;font:600 14px system-ui,sans-serif;display:none}
+  #toast{position:fixed;left:50%;top:70px;transform:translateX(-50%);background:rgba(0,0,0,.7);color:#fff;padding:10px 16px;border-radius:10px;font-size:14px;z-index:9;max-width:84vw;text-align:center;display:none}
+  #touchZones{position:fixed;inset:0;z-index:3;display:none;touch-action:none}
+  .zone{position:absolute;bottom:22px;width:124px;height:124px;border-radius:50%;background:rgba(255,255,255,.16);border:2px solid rgba(255,255,255,.4);color:#fff;font-size:46px;display:flex;align-items:center;justify-content:center;pointer-events:none}
+  .zone.on{background:rgba(255,210,63,.55)}
+  #zL{left:24px} #zR{right:24px}
+  body.ctrl-buttons:not(.in-select) .tbtn{display:flex}
+  body.ctrl-buttons .tbtn.on{background:rgba(255,210,63,.7)}
+  body.ctrl-touch:not(.in-select) #touchZones{display:block}
+  @media (pointer:coarse){
+    #ctrlBtn{display:flex} #help{display:none}
+    #top{top:64px;left:16px}
+    #speed{top:8px;right:14px;bottom:auto;font-size:36px;text-align:right}
+    #boostWrap{top:56px;right:14px;bottom:auto}
+    #driftTxt{bottom:140px}
+  }
+  @media (max-height:520px){
+    #select{bottom:6px;gap:2px}
+    #select .title{display:none}
+    .selName{font-size:22px;min-width:200px} #trkName{font-size:17px}
+    .arrow{width:40px;height:34px;font-size:17px}
+    #selGo{padding:7px 26px;font-size:17px;margin-top:2px}
+    #selHint,.fileBtn{font-size:11px;padding:4px 10px}
+    #msg{font-size:56px} #sub{top:calc(30% + 70px);font-size:16px}
+  }
 </style>
 </head>
 <body>
+<button id="fsBtn" class="topBtn" aria-label="Fullscreen"></button>
+<button id="ctrlBtn" class="topBtn">Controls: Touch</button>
+<div id="toast"></div>
+<div id="touchZones"><div class="zone" id="zL">◀</div><div class="zone" id="zR">▶</div></div>
 <div id="loading"><div id="loadMsg">Loading Banana Racer…</div><small id="loadSub"></small></div>
 <div id="hud">
   <div id="top"></div>
@@ -54,17 +85,18 @@
   <div class="selRow"><button class="arrow" id="selPrev">◀</button><div class="selName" id="selName">…</div><button class="arrow" id="selNext">▶</button></div>
   <div class="title">Track</div>
   <div class="selRow"><button class="arrow" id="trkPrev">◀</button><div class="selName" id="trkName">…</div><button class="arrow" id="trkNext">▶</button></div>
+  <div><span id="records"></span><button id="resetRec">reset</button></div>
   <button id="selGo" disabled>LOADING…</button>
   <div id="selHint">←/→ car · ↑/↓ track · Enter to start</div>
   <label class="fileBtn">＋ Add .glb (car / track) or a background image<input type="file" id="fileIn" accept=".glb,.jpg,.jpeg,.png,.webp" multiple hidden></label>
   <div id="selMsg"></div>
 </div>
-<div class="tbtn" id="bL" style="left:16px">◀</div>
-<div class="tbtn" id="bR" style="left:96px">▶</div>
-<div class="tbtn" id="bB" style="right:96px;bottom:96px;width:56px;height:56px;font-size:16px">NOS</div>
-<div class="tbtn" id="bJ" style="right:96px;font-size:14px">JUMP</div>
-<div class="tbtn" id="bG" style="right:16px;font-size:14px">GAS</div>
-<div class="tbtn" id="bBr" style="right:16px;bottom:96px;width:56px;height:56px;font-size:14px">BRK</div>
+<div class="tbtn" id="bL" style="left:18px;bottom:22px;width:104px;height:104px;font-size:42px">◀</div>
+<div class="tbtn" id="bR" style="left:138px;bottom:22px;width:104px;height:104px;font-size:42px">▶</div>
+<div class="tbtn" id="bB" style="right:140px;bottom:130px;width:84px;height:84px;font-size:16px">NOS</div>
+<div class="tbtn" id="bJ" style="right:150px;bottom:22px;width:96px;height:96px;font-size:18px">JUMP</div>
+<div class="tbtn" id="bG" style="right:18px;bottom:22px;width:116px;height:116px;font-size:20px">GAS</div>
+<div class="tbtn" id="bBr" style="right:18px;bottom:152px;width:96px;height:96px;font-size:18px">BRK</div>
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/loaders/GLTFLoader.js"></script>
