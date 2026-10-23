@@ -145,6 +145,12 @@ $('ctrlBtn').addEventListener('click', () => {
 });
 applyCtrlMode();
 
+// ---- Restart / Menu buttons (same as the Enter and C keys) ----
+$('restartBtn').addEventListener('click', () => { if (race.state !== 'loading' && race.state !== 'select') restartRace(); });
+$('menuBtn').addEventListener('click', () => { if (race.state !== 'loading') enterSelect(); });
+// a clicked button must not keep keyboard focus (Space/Enter would "click" it again)
+document.querySelectorAll('button').forEach(b => b.addEventListener('click', () => b.blur()));
+
 // ---- fullscreen button (top-left) ----
 let toastTimer = 0;
 function showToast(msg) { const el = $('toast'); el.textContent = msg; el.style.display = 'block'; clearTimeout(toastTimer); toastTimer = setTimeout(() => { el.style.display = 'none'; }, 5000); }
@@ -922,7 +928,7 @@ function update(dt) {
           $('msg').textContent = pl === 1 ? 'YOU WIN!' : 'FINISH! ' + ORD[pl - 1];
           $('sub').textContent = 'Total ' + fmt(race.t) + '   ·   Best lap ' + fmt(race.best) +
             (beatRace ? '\n★ NEW RACE RECORD ★' : '') + (race.newLap ? '\n★ NEW BEST LAP RECORD ★' : '') +
-            '\nEnter: race again  ·  C: car / track menu';
+            '\n' + (IS_TOUCH ? 'Tap Restart or Menu (top-left)' : 'Enter: race again  ·  C: car / track menu');
         } else {
           setRec(rec);
           flash(beatLap && hadLap ? 'NEW BEST LAP!' : 'LAP ' + (car.laps + 1), 900);
