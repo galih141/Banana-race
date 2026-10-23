@@ -638,6 +638,20 @@ function respawn() {
   car.speed = 0; car.vy = 0; car.air = false; car.drift = 0; car.driftT = 0;
 }
 
+// ---------- high scores (saved in this browser, per track) ----------
+const REC_KEY = 'bananaRacerRecords_v1';
+function loadRecs() { try { return JSON.parse(localStorage.getItem(REC_KEY) || '{}'); } catch (e) { return {}; } }
+function saveRecs(r) { try { localStorage.setItem(REC_KEY, JSON.stringify(r)); } catch (e) { /* storage blocked */ } }
+function trackKey() { const t = TRACKS[trackIdx]; return t ? (t.file || t.name) : '?'; }
+function getRec() { return loadRecs()[trackKey()] || {}; }
+function setRec(rec) { const all = loadRecs(); all[trackKey()] = rec; saveRecs(all); }
+function showRecords() {
+  const r = getRec();
+  $('records').textContent = (r.bestRace || r.bestLap)
+    ? '🏁 Best race ' + (r.bestRace ? fmt(r.bestRace.t) + ' (' + r.bestRace.car + ')' : '—') + '  ·  Best lap ' + (r.bestLap ? fmt(r.bestLap.t) + ' (' + r.bestLap.car + ')' : '—')
+    : 'No record on this track yet';
+}
+
 // ---------- select screen ----------
 let carIdx = 0, trackIdx = 0, carTok = 0, trackTok = 0, busy = 0, started = false;
 let toastT = 0;
@@ -658,6 +672,7 @@ async function chooseTrack(i) {
     applyTrack(t);
     updateBackdrop(TRACKS[trackIdx], t);
     $('trkName').textContent = TRACKS[trackIdx].name;
+    showRecords();
     if (!t.hasGate) toast('"' + TRACKS[trackIdx].name + '": no box named "lap" found — start line placed automatically.', 6);
     if (playerRig && race.state === 'select') placeAtStart();
   } catch (e) {
@@ -692,7 +707,7 @@ function enterSelect() {
   placeAtStart();
   race = { state: 'select', t: 0, countdown: 3.4, lapStart: 0, best: race.best, total: 0 };
   $('select').style.display = 'flex'; $('msg').textContent = ''; $('sub').textContent = '';
-  document.body.classList.add('in-select'); clearTouch();
+  document.body.classList.add('in-select'); clearTouch(); showRecords();
   $('selHint').textContent = (CARS.length > 1 ? '←/→ car · ' : '') + (TRACKS.length > 1 ? '↑/↓ track · ' : '') + 'Enter to start   (' + CARS.length + ' cars, ' + TRACKS.length + ' tracks found)';
 }
 function startFromSelect() {
@@ -706,6 +721,7 @@ $('selNext').addEventListener('click', () => { startAudio(); chooseCar(carIdx + 
 $('trkPrev').addEventListener('click', () => chooseTrack(trackIdx - 1));
 $('trkNext').addEventListener('click', () => chooseTrack(trackIdx + 1));
 $('selGo').addEventListener('click', () => { startAudio(); startFromSelect(); });
+$('resetRec').addEventListener('click', () => { if (confirm('Delete all saved records?')) { try { localStorage.removeItem(REC_KEY); } catch (e) { /* ignore */ } race.best = null; showRecords(); } });
 
 // ---- add .glb files by hand (drag & drop or button) — handy when testing before uploading ----
 function classify(gltf) {
@@ -892,13 +908,25 @@ function update(dt) {
         const lt = race.t - race.lapStart; race.lapStart = race.t;
         if (race.best === null || lt < race.best) race.best = lt;
         sfx(880, 0.2, 'triangle', 0.1);
+        const rec = getRec(), carName = CARS[carIdx] ? CARS[carIdx].name : '';
+        const hadLap = !!rec.bestLap;
+        let beatLap = false;
+        if (!rec.bestLap || lt < rec.bestLap.t) { rec.bestLap = { t: lt, car: carName }; beatLap = true; race.newLap = true; }
         if (car.laps >= TOTAL_LAPS) {
           car.finished = true; car.finishT = race.t;
           race.state = 'finish'; race.total = race.t;
+          let beatRace = false;
+          if (!rec.bestRace || race.t < rec.bestRace.t) { rec.bestRace = { t: race.t, car: carName }; beatRace = true; }
+          setRec(rec);
           const pl = playerRank();
           $('msg').textContent = pl === 1 ? 'YOU WIN!' : 'FINISH! ' + ORD[pl - 1];
-          $('sub').textContent = 'Total ' + fmt(race.t) + '   ·   Best lap ' + fmt(race.best) + '\nEnter: race again  ·  C: car / track menu';
-        } else flash('LAP ' + (car.laps + 1), 900);
+          $('sub').textContent = 'Total ' + fmt(race.t) + '   ·   Best lap ' + fmt(race.best) +
+            (beatRace ? '\n★ NEW RACE RECORD ★' : '') + (race.newLap ? '\n★ NEW BEST LAP RECORD ★' : '') +
+            '\nEnter: race again  ·  C: car / track menu';
+        } else {
+          setRec(rec);
+          flash(beatLap && hadLap ? 'NEW BEST LAP!' : 'LAP ' + (car.laps + 1), 900);
+        }
       }
     }
   }
