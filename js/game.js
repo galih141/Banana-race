@@ -98,6 +98,73 @@ function bindBtn(id, code) {
 bindBtn('bL', 'ArrowLeft'); bindBtn('bR', 'ArrowRight'); bindBtn('bG', 'ArrowUp');
 bindBtn('bBr', 'ArrowDown'); bindBtn('bJ', 'Space'); bindBtn('bB', 'ShiftLeft');
 
+// ---- phone controls ----
+// "Touch": left/right halves of the screen, gas is automatic.
+//   hold one side then add the other  = drift;   both sides pressed together = brake / reverse
+// "Buttons": on-screen buttons.   (keyboard keeps working everywhere)
+const IS_TOUCH = matchMedia('(pointer:coarse)').matches;
+const SIMUL_MS = 170;                              // two fingers landing within this time = "together"
+let ctrlMode = IS_TOUCH ? 'touch' : 'keyboard';
+try { const s = localStorage.getItem('ctrlMode'); if (IS_TOUCH && (s === 'touch' || s === 'buttons')) ctrlMode = s; } catch (e) { /* ignore */ }
+const touches = new Map();                         // pointerId -> {side, t}
+let brakeLatch = false;
+function sidesActive() { let L = false, R = false; touches.forEach(p => { if (p.side === 'L') L = true; else R = true; }); return { L, R }; }
+function syncTouch() {
+  const s = sidesActive();
+  if (!(s.L && s.R)) brakeLatch = false;
+  keys.TouchLeft = s.L; keys.TouchRight = s.R; keys.TouchBrake = brakeLatch;
+  $('zL').classList.toggle('on', s.L); $('zR').classList.toggle('on', s.R);
+}
+function clearTouch() { touches.clear(); brakeLatch = false; syncTouch(); }
+$('touchZones').addEventListener('pointerdown', e => {
+  e.preventDefault(); startAudio();
+  const side = e.clientX < innerWidth / 2 ? 'L' : 'R', opp = side === 'L' ? 'R' : 'L', now = performance.now();
+  const before = sidesActive();
+  touches.set(e.pointerId, { side, t: now });
+  if (before[opp] && !before[side]) {
+    let first = 1e18; touches.forEach(p => { if (p.side === opp && p.t < first) first = p.t; });
+    if (now - first <= SIMUL_MS) brakeLatch = true;
+  }
+  syncTouch();
+});
+const touchEnd = e => { if (touches.delete(e.pointerId)) syncTouch(); };
+addEventListener('pointerup', touchEnd); addEventListener('pointercancel', touchEnd);
+addEventListener('blur', clearTouch);
+function applyCtrlMode() {
+  document.body.classList.toggle('ctrl-touch', ctrlMode === 'touch');
+  document.body.classList.toggle('ctrl-buttons', ctrlMode === 'buttons');
+  $('ctrlBtn').textContent = 'Controls: ' + (ctrlMode === 'touch' ? 'Touch' : 'Buttons');
+  clearTouch();
+  for (const k of ['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', 'Space', 'ShiftLeft']) keys[k] = false;
+  document.querySelectorAll('.tbtn').forEach(b => b.classList.remove('on'));
+}
+$('ctrlBtn').addEventListener('click', () => {
+  ctrlMode = ctrlMode === 'touch' ? 'buttons' : 'touch';
+  try { localStorage.setItem('ctrlMode', ctrlMode); } catch (e) { /* ignore */ }
+  applyCtrlMode();
+});
+applyCtrlMode();
+
+// ---- fullscreen button (top-left) ----
+let toastTimer = 0;
+function showToast(msg) { const el = $('toast'); el.textContent = msg; el.style.display = 'block'; clearTimeout(toastTimer); toastTimer = setTimeout(() => { el.style.display = 'none'; }, 5000); }
+const fsEl = () => document.fullscreenElement || document.webkitFullscreenElement;
+const ICON_ENTER = '<svg viewBox="0 0 24 24"><path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"/></svg>';
+const ICON_EXIT = '<svg viewBox="0 0 24 24"><path d="M9 4v5H4M15 4v5h5M9 20v-5H4M15 20v-5h5"/></svg>';
+function syncFsIcon() { $('fsBtn').innerHTML = fsEl() ? ICON_EXIT : ICON_ENTER; }
+syncFsIcon();
+document.addEventListener('fullscreenchange', syncFsIcon);
+document.addEventListener('webkitfullscreenchange', syncFsIcon);
+$('fsBtn').addEventListener('click', async () => {
+  startAudio();
+  const el = document.documentElement;
+  if (fsEl()) { (document.exitFullscreen || document.webkitExitFullscreen).call(document); return; }
+  const req = el.requestFullscreen || el.webkitRequestFullscreen;
+  if (!req) { showToast('Fullscreen is not available in this browser. On iPhone: Share → Add to Home Screen, then open the game from there.'); return; }
+  try { await req.call(el); } catch (e) { showToast('The browser blocked fullscreen.'); return; }
+  try { if (screen.orientation && screen.orientation.lock) await screen.orientation.lock('landscape'); } catch (e) { /* not supported */ }
+});
+
 // ---------- audio (tiny engine hum) ----------
 let actx = null, osc = null, gain = null, muted = false;
 function startAudio() {
@@ -625,11 +692,13 @@ function enterSelect() {
   placeAtStart();
   race = { state: 'select', t: 0, countdown: 3.4, lapStart: 0, best: race.best, total: 0 };
   $('select').style.display = 'flex'; $('msg').textContent = ''; $('sub').textContent = '';
+  document.body.classList.add('in-select'); clearTouch();
   $('selHint').textContent = (CARS.length > 1 ? '←/→ car · ' : '') + (TRACKS.length > 1 ? '↑/↓ track · ' : '') + 'Enter to start   (' + CARS.length + ' cars, ' + TRACKS.length + ' tracks found)';
 }
 function startFromSelect() {
   if (race.state !== 'select' || busy > 0 || !playerRig || !TRACK) return;
   $('select').style.display = 'none'; $('selMsg').textContent = '';
+  document.body.classList.remove('in-select'); clearTouch();
   restartRace();
 }
 $('selPrev').addEventListener('click', () => { startAudio(); chooseCar(carIdx - 1); });
@@ -682,10 +751,11 @@ function probes(x, z, yaw) {
 }
 
 function update(dt) {
-  const throttle = down('ArrowUp', 'KeyW') ? 1 : 0;
-  const brake = down('ArrowDown', 'KeyS') ? 1 : 0;
-  const left = down('ArrowLeft', 'KeyA') ? 1 : 0;
-  const right = down('ArrowRight', 'KeyD') ? 1 : 0;
+  const tch = ctrlMode === 'touch', tb = tch && keys.TouchBrake;
+  const throttle = (down('ArrowUp', 'KeyW') || (tch && race.state === 'race' && !tb)) ? 1 : 0;   // touch mode: gas is automatic
+  const brake = (down('ArrowDown', 'KeyS') || tb) ? 1 : 0;
+  const left = (down('ArrowLeft', 'KeyA') || (tch && keys.TouchLeft && !tb)) ? 1 : 0;
+  const right = (down('ArrowRight', 'KeyD') || (tch && keys.TouchRight && !tb)) ? 1 : 0;
   const wantJump = down('Space');
   const wantBoost = down('ShiftLeft', 'ShiftRight');
   const racing = race.state === 'race';
@@ -877,7 +947,7 @@ function updateHUD() {
   const lapNo = clamp(car.laps + 1, 1, TOTAL_LAPS);
   const pos = (race.state === 'race' || race.state === 'finish') ? playerRank() : (bots.length + 1);
   elTop.innerHTML = 'LAP ' + lapNo + ' / ' + TOTAL_LAPS + ' &nbsp;·&nbsp; POS ' + pos + ' / ' + (bots.length + 1) + '<br><small>Time ' + fmt(race.t) + (race.best !== null ? '  ·  Best lap ' + fmt(race.best) : '') + '</small>';
-  elDrift.textContent = car.drift ? (car.driftT > 0.8 ? 'DRIFT ⚡ release for turbo' : 'DRIFT') : '';
+  elDrift.textContent = car.drift ? (car.driftT > 0.8 ? 'DRIFT ⚡ release for turbo' : 'DRIFT') : (ctrlMode === 'touch' && keys.TouchBrake ? 'BRAKE' : '');
   elDrift.style.color = car.driftT > 0.8 ? '#ffd23f' : '#fff';
   elSpeed.firstChild.nodeValue = Math.round(Math.abs(car.speed) / MAX_SPEED * 65) + ' ';
   elBoost.style.width = (car.boost * 100) + '%';
