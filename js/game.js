@@ -11,6 +11,12 @@ if (typeof THREE === 'undefined' || !THREE.GLTFLoader) {
   return;
 }
 
+if (!RL.isCollisionName || !RL.buildSolid || !RL.isMatteName || !RL.solidCell) {   // an old racingline.js is still on the site
+  $('loadMsg').textContent = 'js/racingline.js is out of date';
+  $('loadSub').textContent = 'Upload the newest js/racingline.js (and js/game.js + index.html) to your repo, wait a minute, then reload with Ctrl+F5.';
+  return;
+}
+
 // ---------- tuning (world units) ----------
 const MAX_SPEED   = 2.3;
 const BOOST_MULT  = 1.45;
