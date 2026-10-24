@@ -36,14 +36,19 @@
   #records{font-size:13px;opacity:.95;margin-top:2px}
   #resetRec{font-size:11px;padding:2px 8px;opacity:.7;border-radius:8px;border:1px solid rgba(255,255,255,.5);background:rgba(0,0,0,.25);color:#fff;cursor:pointer;margin-left:6px}
   #selMsg{font-size:14px;color:#ffd6d6;min-height:18px;max-width:90vw;text-align:center}
-  #topBar{position:fixed;top:10px;left:10px;display:flex;gap:8px;z-index:8;align-items:center}
+  #topBar{position:fixed;top:10px;left:10px;z-index:8;display:flex;flex-direction:column;align-items:flex-start;gap:8px}
+  #topPanel{display:none;flex-direction:column;gap:8px}
+  #topBar.open #topPanel{display:flex}
+  #menuToggle{width:46px;padding:0;font-size:22px}
+  #topPanel .topBtn{min-width:210px;justify-content:flex-start;gap:10px}
+  #topPanel .topBtn kbd{margin-left:auto}
+  .ico{display:inline-flex;width:24px;justify-content:center}
   .topBtn{height:46px;min-width:46px;border-radius:12px;background:rgba(0,0,0,.4);border:2px solid rgba(255,255,255,.75);color:#fff;display:flex;align-items:center;justify-content:center;gap:6px;padding:0 12px;cursor:pointer;font:600 14px system-ui,sans-serif}
   .topBtn kbd{font:600 11px system-ui,sans-serif;border:1px solid rgba(255,255,255,.7);border-radius:5px;padding:1px 5px;opacity:.85}
-  #fsBtn{padding:0;width:46px}
   body.in-select #restartBtn,body.in-select #menuBtn{display:none}
   .topBtn svg{width:24px;height:24px;fill:none;stroke:#fff;stroke-width:2.4;stroke-linecap:round;stroke-linejoin:round}
   #ctrlBtn{display:none}
-  @media (max-width:560px){.topBtn span{display:none}}
+
   #toast{position:fixed;left:50%;top:70px;transform:translateX(-50%);background:rgba(0,0,0,.7);color:#fff;padding:10px 16px;border-radius:10px;font-size:14px;z-index:9;max-width:84vw;text-align:center;display:none}
   #touchZones{position:fixed;inset:0;z-index:3;display:none;touch-action:none}
   .zone{position:absolute;bottom:22px;width:124px;height:124px;border-radius:50%;background:rgba(255,255,255,.16);border:2px solid rgba(255,255,255,.4);color:#fff;font-size:46px;display:flex;align-items:center;justify-content:center;pointer-events:none}
@@ -71,10 +76,13 @@
 </head>
 <body>
 <div id="topBar">
-  <button id="fsBtn" class="topBtn" aria-label="Fullscreen" title="Fullscreen"></button>
-  <button id="ctrlBtn" class="topBtn">Controls: Touch</button>
-  <button id="restartBtn" class="topBtn" title="Restart race (Enter)">↻ <span>Restart</span> <kbd>Enter</kbd></button>
-  <button id="menuBtn" class="topBtn" title="Car / track menu (C)">☰ <span>Menu</span> <kbd>C</kbd></button>
+  <button id="menuToggle" class="topBtn" aria-label="Menu" aria-expanded="false">☰</button>
+  <div id="topPanel">
+    <button id="fsBtn" class="topBtn" title="Fullscreen"><span class="ico" id="fsIcon"></span><span>Fullscreen</span></button>
+    <button id="ctrlBtn" class="topBtn"><span class="ico">🎮</span><span id="ctrlLabel">Controls: Touch</span></button>
+    <button id="restartBtn" class="topBtn" title="Restart race (Enter)"><span class="ico">↻</span><span>Restart</span><kbd>Enter</kbd></button>
+    <button id="menuBtn" class="topBtn" title="Car / track menu (C)"><span class="ico">🏁</span><span>Car / track</span><kbd>C</kbd></button>
+  </div>
 </div>
 <div id="toast"></div>
 <div id="touchZones"><div class="zone" id="zL">◀</div><div class="zone" id="zR">▶</div></div>
