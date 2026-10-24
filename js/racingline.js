@@ -23,6 +23,67 @@
   // matte painting: a mesh named "matepainting" (or "mattepainting") — a flat-shaded background dome
   RL.isMatteName = name => /^matt?epaint/.test(norm(name));
 
+  // collision: solid objects. Name starts with "collision"; add "hidden" in the name (collision_hidden_wall) to make it invisible
+  RL.isCollisionName = name => norm(name).startsWith('collision');
+  RL.collisionHidden = name => /hidden|invisible/.test(norm(name));
+
+  // Solid-object height map. tris: flat [x,z,y, x,z,y, x,z,y, ...] in world units.
+  // For every cell it stores the lowest and highest y of the object there (Infinity / -Infinity = empty).
+  RL.buildSolid = function (tris, cell) {
+    let minX = 1e18, minZ = 1e18, maxX = -1e18, maxZ = -1e18;
+    for (let i = 0; i < tris.length; i += 3) {
+      const x = tris[i], z = tris[i + 1];
+      if (x < minX) minX = x; if (x > maxX) maxX = x;
+      if (z < minZ) minZ = z; if (z > maxZ) maxZ = z;
+    }
+    if (!(maxX >= minX)) return null;
+    cell = Math.max(cell, Math.max(maxX - minX, maxZ - minZ) / 1200);
+    minX -= cell * 3; minZ -= cell * 3;
+    const w = Math.ceil((maxX - minX) / cell) + 4, h = Math.ceil((maxZ - minZ) / cell) + 4;
+    const lo = new Float32Array(w * h).fill(Infinity), hi = new Float32Array(w * h).fill(-Infinity);
+    const mark = (i, j, y) => {
+      if (i < 0 || j < 0 || i >= w || j >= h) return;
+      const k = j * w + i;
+      if (y < lo[k]) lo[k] = y; if (y > hi[k]) hi[k] = y;
+    };
+    for (let t = 0; t < tris.length; t += 9) {
+      const x0 = tris[t], z0 = tris[t + 1], y0 = tris[t + 2], x1 = tris[t + 3], z1 = tris[t + 4], y1 = tris[t + 5], x2 = tris[t + 6], z2 = tris[t + 7], y2 = tris[t + 8];
+      const cellOf = (x, z) => [Math.floor((x - minX) / cell), Math.floor((z - minZ) / cell)];
+      // the three corners always count (tiny / steep triangles)
+      [[x0, z0, y0], [x1, z1, y1], [x2, z2, y2]].forEach(p => { const c = cellOf(p[0], p[1]); mark(c[0], c[1], p[2]); });
+      const d = (z1 - z2) * (x0 - x2) + (x2 - x1) * (z0 - z2);
+      if (Math.abs(d) < cell * cell * 0.5) {         // (almost) vertical triangle: walk along its edges, 3 cells thick
+        const E = [[x0, z0, y0, x1, z1, y1], [x1, z1, y1, x2, z2, y2], [x2, z2, y2, x0, z0, y0]];
+        for (const e of E) {
+          const len = Math.hypot(e[3] - e[0], e[4] - e[1]), n = Math.max(1, Math.ceil(len / (cell * 0.5)));
+          for (let s = 0; s <= n; s++) {
+            const u = s / n, c = cellOf(e[0] + (e[3] - e[0]) * u, e[1] + (e[4] - e[1]) * u), y = e[2] + (e[5] - e[2]) * u;
+            for (let a = -1; a <= 1; a++) for (let b = -1; b <= 1; b++) mark(c[0] + a, c[1] + b, y);
+          }
+        }
+        continue;
+      }
+      const i0 = Math.max(0, Math.floor((Math.min(x0, x1, x2) - minX) / cell) - 1), i1 = Math.min(w - 1, Math.ceil((Math.max(x0, x1, x2) - minX) / cell) + 1);
+      const j0 = Math.max(0, Math.floor((Math.min(z0, z1, z2) - minZ) / cell) - 1), j1 = Math.min(h - 1, Math.ceil((Math.max(z0, z1, z2) - minZ) / cell) + 1);
+      for (let j = j0; j <= j1; j++) {
+        const cz = minZ + (j + 0.5) * cell;
+        for (let i = i0; i <= i1; i++) {
+          const cx = minX + (i + 0.5) * cell;
+          const l0 = ((z1 - z2) * (cx - x2) + (x2 - x1) * (cz - z2)) / d, l1 = ((z2 - z0) * (cx - x2) + (x0 - x2) * (cz - z2)) / d, l2 = 1 - l0 - l1;
+          if (l0 >= -0.03 && l1 >= -0.03 && l2 >= -0.03) mark(i, j, l0 * y0 + l1 * y1 + l2 * y2);
+        }
+      }
+    }
+    return { lo, hi, w, h, minX, minZ, cell };
+  };
+  // index of the solid cell at x,z (or -1)
+  RL.solidCell = function (sg, x, z) {
+    const i = Math.floor((x - sg.minX) / sg.cell), j = Math.floor((z - sg.minZ) / sg.cell);
+    if (i < 0 || j < 0 || i >= sg.w || j >= sg.h) return -1;
+    const k = j * sg.w + i;
+    return sg.hi[k] > -Infinity ? k : -1;
+  };
+
   // ---- road mask ----
   // tris: flat array [x0,z0,x1,z1,x2,z2, ...] in world units (top-down projection of the road surface)
   RL.buildGrid = function (tris, cellHint) {
