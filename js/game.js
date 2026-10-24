@@ -27,6 +27,9 @@ const BOT_SKILLS  = [0.97, 0.93];
 const CAR_LEN_WORLD  = 0.19;    // every car is scaled to this length
 const REF_ROAD_WIDTH = 0.866;   // every track is scaled so its road is this wide (keeps speed/size feel the same)
 const LINE_SPACING   = 0.057;   // distance between racing-line points
+const TURN_CAP_KMH = 45;        // touch mode: speed (on the speedometer) the car eases down to while you hold a turn
+const TURN_DECEL = 0.5;         // ...and how slowly it gets there (speed units per second)
+const CAR_H = 0.1;              // car height for collision with solid objects
 
 const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
 const fmt = t => { const m = Math.floor(t / 60), s = t - m * 60; return m + ':' + (s < 10 ? '0' : '') + s.toFixed(2); };
@@ -133,7 +136,7 @@ addEventListener('blur', clearTouch);
 function applyCtrlMode() {
   document.body.classList.toggle('ctrl-touch', ctrlMode === 'touch');
   document.body.classList.toggle('ctrl-buttons', ctrlMode === 'buttons');
-  $('ctrlBtn').textContent = 'Controls: ' + (ctrlMode === 'touch' ? 'Touch' : 'Buttons');
+  $('ctrlLabel').textContent = 'Controls: ' + (ctrlMode === 'touch' ? 'Touch' : 'Buttons');
   clearTouch();
   for (const k of ['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', 'Space', 'ShiftLeft']) keys[k] = false;
   document.querySelectorAll('.tbtn').forEach(b => b.classList.remove('on'));
@@ -144,6 +147,13 @@ $('ctrlBtn').addEventListener('click', () => {
   applyCtrlMode();
 });
 applyCtrlMode();
+
+// ---- one button in the top-left corner that opens/closes the others ----
+const topBar = $('topBar');
+function setBar(open) { topBar.classList.toggle('open', open); $('menuToggle').textContent = open ? '✕' : '☰'; $('menuToggle').setAttribute('aria-expanded', String(open)); }
+$('menuToggle').addEventListener('click', () => setBar(!topBar.classList.contains('open')));
+topBar.querySelectorAll('#topPanel .topBtn').forEach(b => b.addEventListener('click', () => setBar(false)));
+document.addEventListener('pointerdown', e => { if (!topBar.contains(e.target)) setBar(false); });
 
 // ---- Restart / Menu buttons (same as the Enter and C keys) ----
 $('restartBtn').addEventListener('click', () => { if (race.state !== 'loading' && race.state !== 'select') restartRace(); });
@@ -157,7 +167,7 @@ function showToast(msg) { const el = $('toast'); el.textContent = msg; el.style.
 const fsEl = () => document.fullscreenElement || document.webkitFullscreenElement;
 const ICON_ENTER = '<svg viewBox="0 0 24 24"><path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"/></svg>';
 const ICON_EXIT = '<svg viewBox="0 0 24 24"><path d="M9 4v5H4M15 4v5h5M9 20v-5H4M15 20v-5h5"/></svg>';
-function syncFsIcon() { $('fsBtn').innerHTML = fsEl() ? ICON_EXIT : ICON_ENTER; }
+function syncFsIcon() { $('fsIcon').innerHTML = fsEl() ? ICON_EXIT : ICON_ENTER; }
 syncFsIcon();
 document.addEventListener('fullscreenchange', syncFsIcon);
 document.addEventListener('webkitfullscreenchange', syncFsIcon);
@@ -202,7 +212,7 @@ let playerRig = null, shadow = null;
 
 // current track
 let roadMeshes = [], trackObj = null, TRACK = null, TN = 0, TTX = [], TTZ = [];
-let rayTop = 4, rayFar = 8, killY = -1.5;
+let rayTop = 4, rayFar = 8, killY = -1.5, SOLID = null;
 const ray = new THREE.Raycaster();
 const DOWN = new THREE.Vector3(0, -1, 0), ORG = new THREE.Vector3();
 function groundAt(x, z) {                 // road height at x,z (null = no road there)
@@ -388,6 +398,31 @@ function roadTriangles(meshes) {
   }
   return tris;
 }
+function solidTriangles(meshes) {                 // world-space triangles [x,z,y,...] of the solid objects
+  const out = [], v = new THREE.Vector3();
+  for (const m of meshes) {
+    m.updateMatrixWorld(true);
+    const pos = m.geometry.attributes.position, idx = m.geometry.index;
+    const n = idx ? idx.count : pos.count;
+    for (let k = 0; k + 2 < n; k += 3) for (let q = 0; q < 3; q++) {
+      v.fromBufferAttribute(pos, idx ? idx.getX(k + q) : k + q).applyMatrix4(m.matrixWorld);
+      out.push(v.x, v.z, v.y);
+    }
+  }
+  return out;
+}
+// how many sample points of a car-sized box at (x,z), feet at height y, are inside a solid object
+function solidCount(x, z, yaw, y, hl, hw) {
+  if (!SOLID) return 0;
+  const s = Math.sin(yaw), c = Math.cos(yaw);
+  let n = 0;
+  for (let a = -2; a <= 2; a++) for (let b = -1; b <= 1; b++) {
+    const la = a * 0.5 * hl, lb = b * hw;
+    const k = RL.solidCell(SOLID, x + s * la + c * lb, z + c * la - s * lb);
+    if (k >= 0 && SOLID.hi[k] > y + 0.02 && SOLID.lo[k] < y + CAR_H) n++;   // taller than a kerb, and not floating above the car
+  }
+  return n;
+}
 function lapFromNode(node) {                      // gate position + the direction of its thin axis (= direction of travel)
   node.updateMatrixWorld(true);
   let mesh = null; node.traverse(o => { if (!mesh && o.isMesh) mesh = o; });
@@ -410,11 +445,12 @@ function processTrack(gltf) {
   const root = gltf.scene;
   root.updateMatrixWorld(true);
   const trackNodes = [], lapNodes = [];
-  const matteNodes = [];
+  const matteNodes = [], collNodes = [];
   root.traverse(o => {
     if (o === root) return;
     if (RL.isLapName(o.name)) lapNodes.push(o);
     else if (RL.isMatteName(o.name)) matteNodes.push(o);
+    else if (RL.isCollisionName(o.name)) collNodes.push(o);
     else if (RL.isTrackName(o.name)) trackNodes.push(o);
   });
   // matte painting mesh: drawn flat (no lighting, no fog, no shadows), never touched by physics
@@ -428,10 +464,11 @@ function processTrack(gltf) {
     o.material = Array.isArray(o.material) ? nm : nm[0];
   }));
   lapNodes.forEach(n => { n.visible = false; });  // the gate is never drawn
+  collNodes.forEach(n => { if (RL.collisionHidden(n.name)) n.visible = false; });   // collision_hidden…: solid but invisible
   if (!trackNodes.length) throw new Error('no node whose name starts with "track" in this file');
   const seen = new Set(); let meshes = [];
   trackNodes.forEach(t => t.traverse(o => {
-    if (o.isMesh && !o.isSkinnedMesh && !seen.has(o) && !anc(o, p => RL.isLapName(p.name) || RL.isMatteName(p.name))) { seen.add(o); meshes.push(o); }
+    if (o.isMesh && !o.isSkinnedMesh && !seen.has(o) && !anc(o, p => RL.isLapName(p.name) || RL.isMatteName(p.name) || RL.isCollisionName(p.name))) { seen.add(o); meshes.push(o); }
   }));
   const matName = m => { const ms = Array.isArray(m.material) ? m.material : [m.material]; return ms.some(x => x && RL.isTrackName(x.name)); };
   if (meshes.some(matName)) meshes = meshes.filter(matName);          // only the drivable material, if one is named "track…"
@@ -457,10 +494,14 @@ function processTrack(gltf) {
   if (reversed) line = RL.reverseLine(line);            // box named lap_reverse
   if (Math.abs(k - 1) > 0.01) { root.scale.multiplyScalar(k); line = RL.scaleLine(line, k); }
   root.updateMatrixWorld(true);
+  let solid = null;
+  const collMeshes = [];
+  collNodes.forEach(n => n.traverse(o => { if (o.isMesh && !o.isSkinnedMesh) collMeshes.push(o); }));
+  if (collMeshes.length) solid = RL.buildSolid(solidTriangles(collMeshes), grid.cell * k);
   const bb = new THREE.Box3(); meshes.forEach(m => bb.expandByObject(m));
   let mixer = null;
   if (gltf.animations && gltf.animations.length) { mixer = new THREE.AnimationMixer(root); gltf.animations.forEach(c => mixer.clipAction(c).play()); }
-  return { root, meshes, line, mixer, top: bb.max.y + 1, far: bb.max.y - bb.min.y + 3, minY: bb.min.y, hasGate: lapNodes.length > 0, hasMatte: matteNodes.length > 0 };
+  return { root, meshes, line, mixer, top: bb.max.y + 1, far: bb.max.y - bb.min.y + 3, minY: bb.min.y, hasGate: lapNodes.length > 0, hasMatte: matteNodes.length > 0, solid };
 }
 async function getTrack(entry) {
   let t = trackCache[entry.url];
@@ -470,7 +511,7 @@ async function getTrack(entry) {
 function applyTrack(t) {
   if (trackObj) scene.remove(trackObj.root);
   trackObj = t; scene.add(t.root);
-  roadMeshes = t.meshes; rayTop = t.top; rayFar = t.far; killY = t.minY - 1.2;
+  roadMeshes = t.meshes; rayTop = t.top; rayFar = t.far; killY = t.minY - 1.2; SOLID = t.solid;
   setRacingLine(t.line);
 }
 
@@ -511,7 +552,7 @@ function buildBots(rigsList) {
   bots = rigsList.map((rig, k) => {
     rig.group.visible = true;
     return { rig, skill: BOT_SKILLS[k % BOT_SKILLS.length], x: 0, z: 0, y: 0, yaw: 0, speed: 0, idx: 0, laps: -1, steer: 0, spin: 0, pitch: 0, roll: 0,
-      lane: 0, laneGoal: 0, laneTimer: 0, finished: false, finishT: 0, shadow: makeShadow(0.28) };
+      lane: 0, laneGoal: 0, laneTimer: 0, stuckT: 0, finished: false, finishT: 0, shadow: makeShadow(0.28) };
   });
 }
 function resetBots() {
@@ -558,8 +599,15 @@ function updateBots(dt) {
       const target = BOT_MAX * b.skill * rb * (1 - clamp(curve * 0.9, 0, 0.5)) * (1 - clamp(Math.abs(diff) * 0.25, 0, 0.3));
       if (b.speed < target) b.speed += BOT_ACCEL * dt * (1 - clamp(b.speed / (BOT_MAX * 1.1), 0, 1) * 0.6);
       else b.speed -= 3 * dt;
-      b.x += Math.sin(b.yaw) * b.speed * dt;
-      b.z += Math.cos(b.yaw) * b.speed * dt;
+      const bx = b.x + Math.sin(b.yaw) * b.speed * dt, bz = b.z + Math.cos(b.yaw) * b.speed * dt;
+      const bi = b.rig.info, bhl = bi.halfL * bi.scale, bhw = bi.halfW * bi.scale;
+      if (SOLID && solidCount(bx, bz, b.yaw, b.y, bhl, bhw) > 0 && solidCount(b.x, b.z, b.yaw, b.y, bhl, bhw) === 0) {
+        b.speed *= 0.5; b.stuckT += dt;                         // blocked: slow down and try another lane
+        b.laneGoal = (b.lane >= 0 ? -1 : 1) * 0.7 * Math.max(0.05, hw - 0.17); b.laneTimer = 2;
+        if (b.stuckT > 2.5) {                                   // still stuck: hop back onto the racing line, a bit further on
+          const j = wrapI(b.idx + 5); b.x = TRACK.x[j]; b.z = TRACK.z[j]; b.yaw = Math.atan2(TTX[j], TTZ[j]); b.speed = 0.3; b.stuckT = 0; b.lane = 0;
+        }
+      } else { b.x = bx; b.z = bz; b.stuckT = Math.max(0, b.stuckT - dt); }
     }
     const h = groundAt(b.x, b.z);
     if (h === null) {                              // slipped off the road: pull back to the line
@@ -793,16 +841,21 @@ function update(dt) {
   const onlyL = left && !right, onlyR = right && !left;
   const endDrift = () => {
     if (car.driftT > 0.8) { car.turbo = Math.min(1.3, 0.5 + car.driftT * 0.3); car.boost = Math.min(1, car.boost + 0.25); sfx(700, 0.2, 'triangle', 0.08); flash('TURBO!', 500); }
-    car.drift = 0; car.driftT = 0;
+    car.drift = 0; car.driftT = 0; car.driftBtn = false;
   };
-  if (!car.drift && racing && !car.air && car.speed > 0.9 && left && right && car.prevOnly !== 0) {
-    car.drift = car.prevOnly; car.driftT = 0; sfx(300, 0.12, 'sawtooth', 0.05);   // +1 = drifting left, -1 = right
+  const btnMode = ctrlMode === 'buttons';
+  if (!car.drift && racing && !car.air && car.speed > 0.9) {
+    if (left && right && car.prevOnly !== 0) {                    // hold one way, tap the other
+      car.drift = car.prevOnly; car.driftT = 0; car.driftBtn = false; sfx(300, 0.12, 'sawtooth', 0.05);   // +1 = drifting left, -1 = right
+    } else if (btnMode && brake && (onlyL || onlyR)) {            // on-screen buttons: turn + brake
+      car.drift = onlyL ? 1 : -1; car.driftT = 0; car.driftBtn = true; sfx(300, 0.12, 'sawtooth', 0.05);
+    }
   }
   car.prevOnly = onlyL ? 1 : (onlyR ? -1 : ((left && right) ? car.prevOnly : 0));
   let steerTarget = left - right;
   if (car.drift) {
     const hd = car.drift > 0 ? left : right, ho = car.drift > 0 ? right : left;
-    if ((!left && !right) || car.speed < 0.6 || car.air || !racing) endDrift();
+    if ((!left && !right) || car.speed < 0.6 || car.air || !racing || (car.driftBtn && !brake)) endDrift();
     else { steerTarget = car.drift * ((hd && !ho) ? 1.0 : ((hd && ho) ? 0.75 : 0.42)); car.driftT += dt; }
   }
   car.steer += (steerTarget - car.steer) * Math.min(1, dt * 10);
@@ -815,14 +868,19 @@ function update(dt) {
   }
 
   // speed
+  // touch mode (auto gas): while you hold a turn the car eases down, slowly, to TURN_CAP_KMH
+  const turnCap = (tch && racing && !car.drift && !turboOn && (onlyL || onlyR) && !tb) ? MAX_SPEED * TURN_CAP_KMH / 65 : 0;
+  const vmaxEff = turnCap ? Math.min(vmax, turnCap) : vmax;
+  // buttons mode: while drifting with turn + brake, the brake button is the drift button (it does not slow the car)
+  const brakeEff = (brake && !(car.drift && btnMode)) ? 1 : 0;
   if (!car.air) {
     if (racing) {
-      if (throttle) car.speed += ACCEL * ((boosting || turboOn) ? 2.2 : 1) * dt * (1 - clamp(Math.max(0, sp) / vmax, 0, 1) * 0.65);
-      if (brake) car.speed += (sp > 0.05 ? -BRAKE : -ACCEL * 0.8) * dt;
+      if (throttle) car.speed += ACCEL * ((boosting || turboOn) ? 2.2 : 1) * dt * (1 - clamp(Math.max(0, sp) / vmaxEff, 0, 1) * 0.65);
+      if (brakeEff) car.speed += (sp > 0.05 ? -BRAKE : -ACCEL * 0.8) * dt;
     }
-    if ((!throttle && !brake) || !racing) { const d = DRAG * dt; car.speed = Math.abs(car.speed) <= d ? 0 : car.speed - Math.sign(car.speed) * d; }
-    car.speed = clamp(car.speed, -MAX_SPEED * 0.45, vmax);
-    if (sp > vmax) car.speed = Math.max(vmax, sp - 2 * dt);
+    if ((!throttle && !brakeEff) || !racing) { const d = DRAG * dt; car.speed = Math.abs(car.speed) <= d ? 0 : car.speed - Math.sign(car.speed) * d; }
+    car.speed = clamp(car.speed, -MAX_SPEED * 0.45, vmaxEff);
+    if (sp > vmaxEff) car.speed = Math.max(vmaxEff, sp - (turnCap ? TURN_DECEL : 2) * dt);
   }
 
   // jump
@@ -835,17 +893,26 @@ function update(dt) {
     if (Math.abs(sl) > 0.75) car.moveYaw = car.yaw - Math.sign(sl) * 0.75; }
   const s = Math.sin(car.moveYaw), c = Math.cos(car.moveYaw);
   let nx = car.x + s * car.speed * dt, nz = car.z + c * car.speed * dt;
-  if (!car.air) {                                  // road edges act as walls
+  const curS = solidCount(car.x, car.z, car.yaw, car.y, HALF_L, HALF_W);
+  if (!car.air) {                                  // road edges and solid objects act as walls
     const cur = probes(car.x, car.z, car.yaw);
     const need = Math.min(4, cur.valid);
-    let ok = probes(nx, nz, car.yaw).valid >= need;
+    const okAt = (px, pz) => {
+      if (probes(px, pz, car.yaw).valid < need) return false;
+      const n = solidCount(px, pz, car.yaw, car.y, HALF_L, HALF_W);
+      return n === 0 || n <= curS;                 // (already inside something: only allow moving out)
+    };
+    let ok = okAt(nx, nz);
     if (!ok) {
-      if (probes(nx, car.z, car.yaw).valid >= need) { nz = car.z; ok = true; }
-      else if (probes(car.x, nz, car.yaw).valid >= need) { nx = car.x; ok = true; }
+      if (okAt(nx, car.z)) { nz = car.z; ok = true; }
+      else if (okAt(car.x, nz)) { nx = car.x; ok = true; }
     }
     if (ok) { car.x = nx; car.z = nz; }
     else { if (Math.abs(car.speed) > 0.5) sfx(110, 0.08, 'square', 0.07); car.speed *= -0.25; car.drift = 0; car.driftT = 0; }
-  } else { car.x = nx; car.z = nz; }
+  } else {
+    if (curS === 0 && solidCount(nx, nz, car.yaw, car.y, HALF_L, HALF_W) > 0) { nx = car.x; nz = car.z; car.speed *= 0.4; }   // hit an object in mid-air
+    car.x = nx; car.z = nz;
+  }
 
   // vertical
   const hC = groundAt(car.x, car.z);
