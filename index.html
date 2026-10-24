@@ -8,7 +8,7 @@
   html,body{margin:0;height:100%;overflow:hidden;background:#9ec9e8;font-family:system-ui,Segoe UI,Roboto,sans-serif;touch-action:none;user-select:none;-webkit-user-select:none}
   canvas{display:block}
   #hud{position:fixed;inset:0;pointer-events:none;color:#fff;text-shadow:0 2px 6px rgba(0,0,0,.55)}
-  #top{position:absolute;top:64px;left:16px;font-size:20px;font-weight:700;line-height:1.35}
+  #top{position:absolute;top:8px;left:68px;font-size:20px;font-weight:700;line-height:1.35}
   #top small{font-weight:500;opacity:.9;font-size:14px}
   #speed{position:absolute;right:18px;bottom:18px;text-align:right;font-weight:800;font-size:44px;line-height:1}
   #speed span{font-size:16px;font-weight:600;opacity:.9}
@@ -63,6 +63,7 @@
     #boostWrap{top:56px;right:14px;bottom:auto}
     #driftTxt{bottom:140px}
   }
+  @media (max-width:520px){#speed{top:60px!important}#boostWrap{top:108px!important}}
   @media (max-height:520px){
     #select{bottom:6px;gap:2px}
     #select .title{display:none}
