@@ -58,7 +58,7 @@
   body.ctrl-buttons .tbtn.on{background:rgba(255,210,63,.7)}
   body.ctrl-touch:not(.in-select) #touchZones{display:block}
   @media (pointer:coarse){
-    #ctrlBtn{display:flex} #help{display:none} .topBtn kbd{display:none}
+    #ctrlBtn{display:flex} #gasBtn{display:none} #help{display:none} .topBtn kbd{display:none}
     #speed{top:8px;right:14px;bottom:auto;font-size:36px;text-align:right}
     #boostWrap{top:56px;right:14px;bottom:auto}
     #driftTxt{bottom:140px}
@@ -80,6 +80,7 @@
   <div id="topPanel">
     <button id="fsBtn" class="topBtn" title="Fullscreen"><span class="ico" id="fsIcon"></span><span>Fullscreen</span></button>
     <button id="ctrlBtn" class="topBtn"><span class="ico">🎮</span><span id="ctrlLabel">Controls: Touch</span></button>
+    <button id="gasBtn" class="topBtn" title="Automatic gas (G)"><span class="ico">⛽</span><span id="gasLabel">Auto gas: Off</span><kbd>G</kbd></button>
     <button id="restartBtn" class="topBtn" title="Restart race (Enter)"><span class="ico">↻</span><span>Restart</span><kbd>Enter</kbd></button>
     <button id="menuBtn" class="topBtn" title="Car / track menu (C)"><span class="ico">🏁</span><span>Car / track</span><kbd>C</kbd></button>
   </div>
@@ -94,7 +95,7 @@
   <div id="boostWrap"><div id="boost"></div></div>
   <div id="driftTxt"></div>
   <div id="speed">0 <span>km/h</span></div>
-  <div id="help">↑/W gas &nbsp; ↓/S brake &nbsp; ←→/AD steer &nbsp; <b>Space</b> jump &nbsp; Shift boost &nbsp; <b>Drift:</b> hold ← then tap → (or → then ←) &nbsp; R reset car &nbsp; Enter restart &nbsp; C car/track menu &nbsp; M mute</div>
+  <div id="help">↑/W gas &nbsp; ↓/S brake &nbsp; ←→/AD steer &nbsp; <b>Space</b> jump &nbsp; Shift boost &nbsp; <b>Drift:</b> hold ← then tap → (or → then ←) &nbsp; G auto gas &nbsp; R reset car &nbsp; Enter restart &nbsp; C car/track menu &nbsp; M mute</div>
 </div>
 <div id="select">
   <div class="title">Car</div>
