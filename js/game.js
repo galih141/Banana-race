@@ -884,8 +884,9 @@ function update(dt) {
   }
 
   // speed
-  // touch mode (auto gas): while you hold a turn the car eases down, slowly, to TURN_CAP_KMH
-  const turnCap = (tch && racing && !car.drift && !turboOn && (onlyL || onlyR) && !tb) ? MAX_SPEED * TURN_CAP_KMH / 65 : 0;
+  // automatic gas (touch mode, or auto gas on desktop): while you hold a turn the car eases down, slowly, to TURN_CAP_KMH
+  const autoDrive = tch || (autoGas && !IS_TOUCH && !down('ArrowUp', 'KeyW'));   // gas is automatic (touch mode, or auto gas on desktop)
+  const turnCap = (autoDrive && racing && !car.drift && !turboOn && !boosting && !brake && (onlyL || onlyR) && !tb) ? MAX_SPEED * TURN_CAP_KMH / 65 : 0;
   const vmaxEff = turnCap ? Math.min(vmax, turnCap) : vmax;
   // buttons mode: while drifting with turn + brake, the brake button is the drift button (it does not slow the car)
   const brakeEff = (brake && !(car.drift && btnMode)) ? 1 : 0;
