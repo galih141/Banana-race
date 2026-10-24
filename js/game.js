@@ -79,6 +79,7 @@ addEventListener('keydown', e => {
   if (['Space', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(e.code)) e.preventDefault();
   startAudio();
   if (e.code === 'KeyM') toggleMute();
+  if (e.code === 'KeyG' && !IS_TOUCH) toggleAutoGas();
   if (race.state === 'select') {
     if (e.code === 'ArrowLeft' || e.code === 'KeyA') chooseCar(carIdx - 1);
     else if (e.code === 'ArrowRight' || e.code === 'KeyD') chooseCar(carIdx + 1);
@@ -153,6 +154,15 @@ $('ctrlBtn').addEventListener('click', () => {
   applyCtrlMode();
 });
 applyCtrlMode();
+
+// ---- desktop: optional automatic gas (G). Many keyboards cannot register Up + Left + Right at once, so with
+//      auto gas on, a drift only needs two keys (hold a turn, tap the other one) ----
+let autoGas = false;
+try { autoGas = localStorage.getItem('autoGas') === '1'; } catch (e) { /* ignore */ }
+function applyAutoGas() { $('gasLabel').textContent = 'Auto gas: ' + (autoGas ? 'On' : 'Off'); }
+function toggleAutoGas() { autoGas = !autoGas; try { localStorage.setItem('autoGas', autoGas ? '1' : '0'); } catch (e) { /* ignore */ } applyAutoGas(); }
+$('gasBtn').addEventListener('click', toggleAutoGas);
+applyAutoGas();
 
 // ---- one button in the top-left corner that opens/closes the others ----
 const topBar = $('topBar');
@@ -828,7 +838,7 @@ function probes(x, z, yaw) {
 
 function update(dt) {
   const tch = ctrlMode === 'touch', tb = tch && keys.TouchBrake;
-  const throttle = (down('ArrowUp', 'KeyW') || (tch && race.state === 'race' && !tb)) ? 1 : 0;   // touch mode: gas is automatic
+  const throttle = (down('ArrowUp', 'KeyW') || (tch && race.state === 'race' && !tb) || (autoGas && !IS_TOUCH && race.state === 'race' && !down('ArrowDown', 'KeyS'))) ? 1 : 0;   // touch mode / auto gas: gas is automatic
   const brake = (down('ArrowDown', 'KeyS') || tb) ? 1 : 0;
   const left = (down('ArrowLeft', 'KeyA') || (tch && keys.TouchLeft && !tb)) ? 1 : 0;
   const right = (down('ArrowRight', 'KeyD') || (tch && keys.TouchRight && !tb)) ? 1 : 0;
