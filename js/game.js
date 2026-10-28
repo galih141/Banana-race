@@ -35,6 +35,8 @@ const REF_ROAD_WIDTH = 0.866;   // every track is scaled so its road is this wid
 const LINE_SPACING   = 0.057;   // distance between racing-line points
 const TURN_CAP_KMH = 45;        // touch mode: speed (on the speedometer) the car eases down to while you hold a turn
 const TURN_DECEL = 0.5;         // ...and how slowly it gets there (speed units per second)
+const TURN_SCRUB = true;        // car animations named turn_left / turn_right: true = their time follows how far you steer (frame 1 = straight, last frame = full lean); false = they just loop
+const OVERLAY_SCRUB = { brake: true, nos: false };   // true = frame 1 = normal pose, last frame = full effect (follows how strongly it is active); false = the clip just loops while active
 const CAR_H = 0.1;              // car height for collision with solid objects
 
 const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
@@ -378,9 +380,74 @@ function makeRig(info, gltf) {                    // a fresh, independent copy o
   group.scale.setScalar(info.scale);
   group.visible = false;
   scene.add(group);
-  let mixer = null;
-  if (gltf.animations && gltf.animations.length) { mixer = new THREE.AnimationMixer(model); gltf.animations.forEach(c => mixer.clipAction(c).play()); }
-  return { info, group, model, wheels, bodies, mixer };
+  // animation clips: idle / onward / turn_left / turn_right are driven by the car; any other clip just loops
+  let mixer = null, anim = null;
+  if (gltf.animations && gltf.animations.length) {
+    mixer = new THREE.AnimationMixer(model);
+    const roles = {};
+    gltf.animations.forEach(c => { const r = clipRole(c.name); if (r && !roles[r]) roles[r] = c; });
+    if (Object.keys(roles).length) {
+      anim = { actions: {}, clips: roles, m: 0, tl: 0, tr: 0, nos: 0, brk: 0, jmp: 0, wasAir: false };
+      for (const r in roles) {
+        const a = mixer.clipAction(roles[r]); a.play(); a.setEffectiveWeight(0); anim.actions[r] = a;
+        if (TURN_SCRUB && (r === 'left' || r === 'right')) a.paused = true;
+        if ((r === 'brake' || r === 'nos') && OVERLAY_SCRUB[r]) a.paused = true;
+        if (r === 'jump') { a.setLoop(THREE.LoopOnce, 1); a.clampWhenFinished = true; }   // plays once per jump
+      }
+      const used = Object.values(roles);
+      gltf.animations.forEach(c => { if (!used.includes(c)) mixer.clipAction(c).play(); });
+    } else gltf.animations.forEach(c => mixer.clipAction(c).play());
+  }
+  return { info, group, model, wheels, bodies, mixer, anim };
+}
+function clipRole(name) {
+  const n = RL.norm(name);
+  if (/idle|stand|start/.test(n)) return 'idle';
+  if (/jump|hop/.test(n)) return 'jump';
+  if (/brake|halt/.test(n)) return 'brake';
+  if (/nos|nitro|boost|turbo/.test(n)) return 'nos';
+  if (/left/.test(n)) return 'left';
+  if (/right/.test(n)) return 'right';
+  if (/onward|ride|drive|forward|move|run|pedal|cruise/.test(n)) return 'onward';
+  return null;
+}
+// idle while the car is (nearly) stopped, onward while it moves, a lean toward turn_left / turn_right while you steer,
+// and jump / nos / brake on top of that while they are happening
+function updateRigAnim(rig, dt, speed, steer, S) {
+  if (!rig.mixer) return;
+  S = S || {};
+  const A = rig.anim;
+  if (A) {
+    const a = A.actions, f = r => Math.min(1, dt * r);
+    A.m += ((Math.abs(speed) > 0.25 ? 1 : 0) - A.m) * f(6);
+    A.tl += (clamp(steer, 0, 1) - A.tl) * f(12);
+    A.tr += (clamp(-steer, 0, 1) - A.tr) * f(12);
+    A.nos += ((S.nos ? 1 : 0) - A.nos) * f(8);
+    A.brk += ((S.brake ? 1 : 0) - A.brk) * f(10);
+    A.jmp += ((S.air ? 1 : 0) - A.jmp) * f(S.air ? 14 : 8);
+    if (S.air && !A.wasAir && a.jump) { a.jump.reset(); a.jump.play(); }
+    A.wasAir = !!S.air;
+    // overlays (jump / nos / brake) take their share, everything else shares what is left
+    const oJ = a.jump ? A.jmp : 0, oN = a.nos ? Math.min(1, A.nos * 3) : 0, oB = a.brake ? Math.min(1, A.brk * 3) : 0;
+    const sum = oJ + oN + oB, o = Math.min(1, sum), keep = 1 - o, share = w => sum > 0 ? w / sum * o : 0;
+    const wL = Math.min(1, A.tl * 3), wR = Math.min(1, A.tr * 3);
+    const base = (1 - Math.max(wL, wR)) * keep;
+    const mOn = a.onward ? (a.idle ? A.m : 1) : 0;       // no onward clip yet: stay on idle
+    if (a.idle) a.idle.setEffectiveWeight(base * (1 - mOn));
+    if (a.onward) a.onward.setEffectiveWeight(base * mOn);
+    for (const [k, w, s] of [['left', wL, A.tl], ['right', wR, A.tr]]) {
+      const act = a[k]; if (!act) continue;
+      act.setEffectiveWeight(w * keep);
+      if (TURN_SCRUB) act.time = Math.min(s, 0.999) * A.clips[k].duration;
+    }
+    if (a.jump) a.jump.setEffectiveWeight(share(oJ));
+    for (const [k, w, s] of [['nos', oN, A.nos], ['brake', oB, A.brk]]) {
+      const act = a[k]; if (!act) continue;
+      act.setEffectiveWeight(share(w));
+      if (OVERLAY_SCRUB[k]) act.time = Math.min(s, 0.999) * A.clips[k].duration;
+    }
+  }
+  rig.mixer.update(dt);
 }
 function disposeRig(rig) { if (rig && rig.group.parent) rig.group.parent.remove(rig.group); }
 function animateWheels(rig, spin, steerAng) {
@@ -586,7 +653,7 @@ function botVisual(b, dt) {
   g.rotation.set(0, b.yaw, 0, 'YXZ');
   g.userData.inner.rotation.set(-b.pitch, 0, b.roll, 'XYZ');
   b.spin += b.speed * dt / (info.wheelR * info.scale);
-  if (b.rig.mixer) b.rig.mixer.update(dt);
+  updateRigAnim(b.rig, dt, b.speed, b.steer);
   animateWheels(b.rig, b.spin, b.steer * 0.45);
   leanBody(b.rig, -b.steer * clamp(b.speed / BOT_MAX, 0, 1) * 0.05);
   const hs = groundAt(b.x, b.z);
@@ -974,7 +1041,7 @@ function update(dt) {
 
   // wheels + body
   car.wheelSpin += car.speed * dt / (WHEEL_R * CAR_SCALE);
-  if (playerRig.mixer) playerRig.mixer.update(dt);
+  updateRigAnim(playerRig, dt, car.speed, car.steer, { air: car.air, nos: boosting || turboOn, brake: !!brakeEff && Math.abs(car.speed) > 0.15 && !car.air });
   animateWheels(playerRig, car.wheelSpin, car.steer * 0.45);
   leanBody(playerRig, -car.steer * clamp(car.speed / MAX_SPEED, 0, 1) * 0.05);
 
